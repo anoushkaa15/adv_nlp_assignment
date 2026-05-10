@@ -1,8 +1,8 @@
-"""Grok API client for the Fake News Verification Agent.
+"""Gemini API client for the Fake News Verification Agent.
 
-The client uses xAI's OpenAI-compatible chat-completions endpoint directly.
-No LangChain, LlamaIndex, or agent framework is used, so each LLM call remains
-visible in the pipeline code.
+The client calls Google's Gemini REST API directly. No LangChain, LlamaIndex,
+or agent framework is used, so each LLM call remains visible in the pipeline
+code.
 """
 
 from __future__ import annotations
@@ -13,75 +13,72 @@ from dataclasses import dataclass
 from typing import Any
 
 
-class GrokClientError(RuntimeError):
-    """Raised when Grok cannot produce a usable response."""
+class GeminiClientError(RuntimeError):
+    """Raised when Gemini cannot produce a usable response."""
 
 
 @dataclass
-class GrokClient:
-    """Small wrapper around the Grok chat completions API."""
+class GeminiClient:
+    """Small wrapper around the Gemini generateContent API."""
 
     api_key: str | None = None
-    model: str = "grok-3-mini"
-    base_url: str = "https://api.x.ai/v1"
+    model: str = "gemini-2.0-flash"
+    base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     timeout: int = 60
 
     def __post_init__(self) -> None:
-        self.api_key = self.api_key or os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")
-        self.model = os.getenv("GROK_MODEL", self.model)
-        self.base_url = os.getenv("XAI_BASE_URL", self.base_url).rstrip("/")
+        self.api_key = self.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        self.model = os.getenv("GEMINI_MODEL", self.model)
+        self.base_url = os.getenv("GEMINI_BASE_URL", self.base_url).rstrip("/")
         if not self.api_key:
-            raise GrokClientError("Missing Grok API key. Set XAI_API_KEY or GROK_API_KEY in your environment or .env file.")
+            raise GeminiClientError(
+                "Missing Gemini API key. Set GEMINI_API_KEY or GOOGLE_API_KEY in your environment or .env file."
+            )
 
     def complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        """Call Grok and parse a JSON object response."""
+        """Call Gemini and parse a JSON object response."""
 
-        text = self._complete(system_prompt, user_prompt, response_format={"type": "json_object"})
+        text = self._complete(system_prompt, user_prompt, response_mime_type="application/json")
         try:
             return json.loads(text)
         except json.JSONDecodeError as exc:
-            raise GrokClientError(f"Expected JSON from Grok, received: {text[:500]}") from exc
+            raise GeminiClientError(f"Expected JSON from Gemini, received: {text[:500]}") from exc
 
     def complete_text(self, system_prompt: str, user_prompt: str) -> str:
-        """Call Grok and return plain text, used for the final Markdown report."""
+        """Call Gemini and return plain text, used for the final Markdown report."""
 
-        return self._complete(system_prompt, user_prompt, response_format=None)
+        return self._complete(system_prompt, user_prompt, response_mime_type="text/plain")
 
-    def _complete(self, system_prompt: str, user_prompt: str, response_format: dict[str, str] | None) -> str:
+    def _complete(self, system_prompt: str, user_prompt: str, response_mime_type: str) -> str:
         import requests
 
         payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.1,
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+                "responseMimeType": response_mime_type,
+            },
         }
-        if response_format:
-            payload["response_format"] = response_format
+        url = f"{self.base_url}/models/{self.model}:generateContent"
 
         try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=self.timeout,
-            )
+            response = requests.post(url, params={"key": self.api_key}, json=payload, timeout=self.timeout)
             response.raise_for_status()
         except requests.Timeout as exc:
-            raise GrokClientError("Grok API request timed out.") from exc
+            raise GeminiClientError("Gemini API request timed out.") from exc
         except requests.RequestException as exc:
-            raise GrokClientError(f"Grok API request failed: {exc}") from exc
+            raise GeminiClientError(f"Gemini API request failed: {exc}") from exc
 
         data = response.json()
         try:
-            return data["choices"][0]["message"]["content"]
+            parts = data["candidates"][0]["content"]["parts"]
+            return "".join(part.get("text", "") for part in parts).strip()
         except (KeyError, IndexError, TypeError) as exc:
-            raise GrokClientError(f"Unexpected Grok response shape: {data}") from exc
+            raise GeminiClientError(f"Unexpected Gemini response shape: {data}") from exc
 
 
-class MockGrokClient:
+class MockGeminiClient:
     """Deterministic LLM replacement for demos when no API key is available."""
 
     def complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
