@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.web_search import mock_evidence, retrieve_evidence
-from utils.grok_client import GrokClient, GrokClientError, MockGrokClient
+from utils.grok_client import GrokClient, OpenAIClientError, MockGrokClient
 from utils.state_manager import create_initial_state, print_step_debug, record_step, save_report_markdown, save_state_json
 
 PROMPT_DIR = Path("prompts")
@@ -217,7 +217,7 @@ def main() -> int:
             output_json=args.output_json,
             debug=not args.quiet,
         )
-    except (AgentInputError, GrokClientError, OSError, ValueError, ImportError) as exc:
+    except (AgentInputError, OpenAIClientError, OSError, ValueError, ImportError) as exc:
         print(f"Agent failed: {exc}")
         return 2
     return 0
@@ -225,3 +225,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
